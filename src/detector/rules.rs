@@ -29,6 +29,11 @@ impl RuleEngine {
         let name_lc = proc_name.to_lowercase();
         let path_lc = exe_path.unwrap_or("").to_lowercase();
 
+        let known_system = ["lsass.exe", "csrss.exe", "smss.exe", "wininit.exe"];
+        if exe_path.is_none() && !known_system.contains(&name_lc.as_str()) {
+            flags.push("no_exe_path".to_string());
+        }
+
         if self.allowlisted_names.contains(&name_lc) {
             return DetectionResult {
                 flags: vec!["allowlisted_name".to_string()],

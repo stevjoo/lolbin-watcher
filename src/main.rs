@@ -6,6 +6,7 @@ use std::{fs::File, io::Read, path::Path};
 
 use lolbin_watcher::{
     collector::process::collect_process_snapshot,
+    collector::process::is_elevated,
     detector::rules::RuleEngine,
     logger::jsonl::append_jsonl,
     models::ProcEvent,
@@ -28,6 +29,10 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    if !is_elevated() {
+        eprintln!("[WARN] lolbin-watcher is not running as Administrator. \
+                   System processes will have missing exe_path.");
+    }
     let args = Args::parse();
     let engine = RuleEngine::from_allowlist_file(&args.allowlist);
 

@@ -27,7 +27,7 @@ lolbin-watcher periodically snapshots running processes and flags suspicious act
 
 - Rust toolchain (`rustup` + `cargo`) — [install here](https://rustup.rs)
 - Windows OS (path heuristics are Windows-specific)
-- **Run as Administrator** for full visibility into system-level processes (see [Known Issues](#known-issues--roadmap))
+- **Run as Administrator** for full visibility into system-level processes
 
 ### Build
 

@@ -1,12 +1,27 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use sysinfo::System;
+use std::process::Command;
+
+pub fn is_elevated() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("net")
+            .args(["session"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "windows"))]
+    { false }
+}
 
 #[derive(Debug, Clone)]
 pub struct ProcSnapshot {
     pub pid: u32,
     pub name: String,
     pub exe_path: Option<PathBuf>,
+    pub is_elevated_process: bool,
 }
 
 // Jadi gini Ko, kita pakai ExecutablePath() dari windows API
@@ -83,6 +98,7 @@ pub fn collect_process_snapshot() -> Result<Vec<ProcSnapshot>> {
             pid: pid_u32,
             name,
             exe_path,
+            is_elevated_process: false,
         });
     }
 

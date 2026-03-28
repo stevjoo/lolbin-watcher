@@ -46,17 +46,54 @@ impl RuleEngine {
         LOLBINS.iter().any(|x| *x == name)
     }
 
+    // Normalize a PE OriginalFilename for comparison.
+    // Windows PE VersionInfo sering pakai suffix .MUI atau .dll untuk binary
+    // yang sebenarnya exe, jadi kita harus normalize dulu sebelum compare.
+    //   "PowerShell.EXE.MUI" → "powershell.exe"
+    //   "CTFMON.EXE.MUI"     → "ctfmon.exe"
+    //   "Copilot.dll"        → "copilot.dll" (tetap, bukan rename sebenarnya)
+    //   "svchost.exe.mui"    → "svchost.exe"
+    fn normalize_original_filename(orig: &str) -> String {
+        let s = orig.trim().to_lowercase();
+        // Strip trailing .mui (resource-only naming convention)
+        if let Some(base) = s.strip_suffix(".mui") {
+            base.to_string()
+        } else {
+            s
+        }
+    }
+
     // Determine whether a binary has been renamed by comparing its current
     // file-system name to the OriginalFilename from its PE VersionInfo.
     // Returns `true` when the two names are present AND different (case-insensitive).
+    //
+    // Handles common Windows PE conventions:
+    //  - .MUI suffix (e.g. "PowerShell.EXE.MUI" is NOT a rename of powershell.exe)
+    //  - .dll vs .exe mismatch in Electron/MSIX apps (e.g. "Copilot.dll" is NOT
+    //    a rename of Copilot.exe — same stem = not suspicious)
     fn is_renamed(actual_name: &str, original_filename: Option<&str>) -> bool {
         match original_filename {
             Some(orig) => {
-                let orig_trimmed = orig.trim().to_lowercase();
-                if orig_trimmed.is_empty() {
+                let normalized = Self::normalize_original_filename(orig);
+                if normalized.is_empty() {
                     return false;
                 }
-                orig_trimmed != actual_name.to_lowercase()
+                let actual_lc = actual_name.to_lowercase();
+
+                // Exact match after normalization artinya not renamed
+                if normalized == actual_lc {
+                    return false;
+                }
+
+                // Same stem, different extension (.exe vs .dll) -> not renamed
+                // Ini sering terjadi di Electron/MSIX apps
+                let stem_actual = actual_lc.rsplit_once('.').map(|(s, _)| s).unwrap_or(&actual_lc);
+                let stem_orig = normalized.rsplit_once('.').map(|(s, _)| s).unwrap_or(&normalized);
+                if stem_actual == stem_orig {
+                    return false;
+                }
+
+                true
             }
             None => false,
         }
@@ -75,7 +112,12 @@ impl RuleEngine {
         if path_lc.contains("\\downloads\\") {
             flags.push("exec_from_downloads".to_string());
         }
-        if path_lc.contains("\\appdata\\roaming\\") || path_lc.contains("\\appdata\\local\\") {
+        // AppData\Local\Programs\ itu standard install directory untuk user-level
+        // apps (Discord, VS Code, Opera, dsb). Jangan flag ini sebagai suspicious.
+        // Yang kita flag hanya direct execution dari AppData yang bukan Programs.
+        let is_appdata = path_lc.contains("\\appdata\\roaming\\") || path_lc.contains("\\appdata\\local\\");
+        let is_programs = path_lc.contains("\\appdata\\local\\programs\\");
+        if is_appdata && !is_programs {
             flags.push("exec_from_appdata".to_string());
         }
         flags
@@ -104,16 +146,17 @@ impl RuleEngine {
         }
 
         // LOLBin detection: by actual name OR by OriginalFilename
-        let orig_lc = original_filename.map(|s| s.trim().to_lowercase());
+        // Pakai normalize supaya .MUI suffix di-strip sebelum compare
+        let orig_normalized = original_filename.map(|s| Self::normalize_original_filename(s));
         let is_lolbin_by_name = Self::is_lolbin(&name_lc);
-        let is_lolbin_by_orig = orig_lc.as_deref().map_or(false, Self::is_lolbin);
+        let is_lolbin_by_orig = orig_normalized.as_deref().map_or(false, Self::is_lolbin);
 
         if is_lolbin_by_name || is_lolbin_by_orig {
             flags.push("lolbin_process".to_string());
         }
 
         // Renamed binary detection
-        if Self::is_renamed(&name_lc, orig_lc.as_deref()) {
+        if Self::is_renamed(&name_lc, orig_normalized.as_deref()) {
             flags.push("renamed_binary".to_string());
         }
 
@@ -136,7 +179,8 @@ impl RuleEngine {
 
         let name_lc = proc_name.to_lowercase();
         let path_lc = exe_path.unwrap_or("").to_lowercase();
-        let orig_lc = original_filename.map(|s| s.trim().to_lowercase());
+        // Pakai normalize supaya .MUI suffix di-strip sebelum compare
+        let orig_normalized = original_filename.map(|s| Self::normalize_original_filename(s));
 
         // Kalau ketemu missing exe_path
         let known_system = ["lsass.exe", "csrss.exe", "smss.exe", "wininit.exe"];
@@ -147,7 +191,7 @@ impl RuleEngine {
         // Allowlist short-circuit
         // Only trust the allowlist when the binary has NOT been renamed.
         // A renamed binary is suspicious regardless of its current name.
-        let renamed = Self::is_renamed(&name_lc, orig_lc.as_deref());
+        let renamed = Self::is_renamed(&name_lc, orig_normalized.as_deref());
         if self.allowlisted_names.contains(&name_lc) && !renamed {
             return DetectionResult {
                 flags: vec!["allowlisted_name".to_string()],
@@ -168,7 +212,7 @@ impl RuleEngine {
 
         // LOLBin detection: by actual name OR by OriginalFilename
         let is_lolbin_by_name = Self::is_lolbin(&name_lc);
-        let is_lolbin_by_orig = orig_lc.as_deref().map_or(false, Self::is_lolbin);
+        let is_lolbin_by_orig = orig_normalized.as_deref().map_or(false, Self::is_lolbin);
 
         if is_lolbin_by_name || is_lolbin_by_orig {
             flags.push("lolbin_process".to_string());

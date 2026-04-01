@@ -17,7 +17,7 @@ lolbin-watcher periodically snapshots running processes and flags suspicious act
 - #️⃣ **On-demand SHA-256 hashing** — only hashes executables that trip a suspicious flag (performance-conscious)
 - 📄 **Structured JSONL logging** — one JSON object per event, append-only, easy to pipe into SIEM or `jq`
 - 📋 **Allowlist support** — skip known-good process names via a plain-text file
-- 🔁 **Continuous or one-shot mode** — run once (`--once`) or poll on a configurable interval
+- 🔁 **Continuous or one-shot mode** — run once (`--once`) or poll
 
 ---
 
@@ -44,7 +44,7 @@ cargo build --release
 .\target\release\lolbin-watcher.exe --once
 
 # Continuous polling every 30 seconds
-.\target\release\lolbin-watcher.exe --interval 30
+.\target\release\lolbin-watcher.exe
 
 # Custom output path and allowlist
 .\target\release\lolbin-watcher.exe --out C:\Logs\lolbin.jsonl --allowlist rules\allowlist.txt
@@ -55,7 +55,6 @@ cargo build --release
 | Flag | Default | Description |
 |---|---|---|
 | `--once` | `false` | Run a single snapshot then exit |
-| `--interval <secs>` | `10` | Polling interval in seconds |
 | `--out <path>` | `logs/lolbin-watcher.jsonl` | Output JSONL log file path |
 | `--allowlist <path>` | `rules/allowlist.txt` | Allowlist of trusted process names (one per line) |
 

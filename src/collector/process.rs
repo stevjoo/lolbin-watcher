@@ -24,6 +24,8 @@ pub struct ProcSnapshot {
     pub name: String,
     pub exe_path: Option<PathBuf>,
     pub is_elevated_process: bool,
+    pub cmd: Vec<String>,
+    pub parent_pid: Option<u32>,
     // The OriginalFilename field from the PE VersionInfo resource.
     // Survives file renames — used to detect renamed LOLBins.
     pub original_filename: Option<String>,
@@ -106,11 +108,16 @@ pub fn collect_process_snapshot() -> Result<Vec<ProcSnapshot>> {
             .and_then(|p| pe_info::read_pe_metadata(p))
             .and_then(|m| m.original_filename);
 
+        let cmd = proc_.cmd().to_vec();
+        let parent_pid = proc_.parent().map(|p| p.as_u32());
+
         out.push(ProcSnapshot {
             pid: pid_u32,
             name,
             exe_path,
             is_elevated_process: false,
+            cmd,
+            parent_pid,
             original_filename,
         });
     }

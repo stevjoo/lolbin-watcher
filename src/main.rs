@@ -26,6 +26,12 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            let _ = std::env::set_current_dir(parent);
+        }
+    }
+
     if !is_elevated() {
         eprintln!("[WARN] lolbin-watcher is not running as Administrator. \
                    System processes will have missing exe_path.");
@@ -40,17 +46,24 @@ fn main() -> Result<()> {
 
     loop {
         run_once(&engine, &args.out)?;
+        std::thread::sleep(std::time::Duration::from_secs(2));
     }
 }
 
 fn run_once(engine: &RuleEngine, out_path: &str) -> Result<()> {
     let snapshot = collect_process_snapshot()?;
 
+    let mut pid_to_name = std::collections::HashMap::new();
+    for p in &snapshot {
+        pid_to_name.insert(p.pid, p.name.clone());
+    }
+
     for p in snapshot {
     let exe_str = p.exe_path.as_ref().map(|x| x.to_string_lossy().to_string());
     let orig_fn = p.original_filename.as_deref();
+    let parent_name = p.parent_pid.and_then(|pid| pid_to_name.get(&pid).map(|s| s.as_str()));
 
-    let quick = engine.quick_flags(&p.name, exe_str.as_deref(), orig_fn);
+    let quick = engine.quick_flags(&p.name, exe_str.as_deref(), orig_fn, &p.cmd, parent_name);
 
     let should_hash = quick.iter().any(|f|
         f == "exec_from_temp" ||
@@ -58,6 +71,8 @@ fn run_once(engine: &RuleEngine, out_path: &str) -> Result<()> {
         f == "exec_from_appdata" ||
         f == "lolbin_process" ||
         f == "renamed_binary" ||
+        f == "suspicious_cmdline" ||
+        f == "suspicious_parent" ||
         f == "lolbin_masquerade"
     );
 
@@ -74,6 +89,8 @@ fn run_once(engine: &RuleEngine, out_path: &str) -> Result<()> {
         &p.name,
         exe_str.as_deref(),
         orig_fn,
+        &p.cmd,
+        parent_name,
         sha_str.as_deref(),
     );
 
@@ -83,6 +100,8 @@ fn run_once(engine: &RuleEngine, out_path: &str) -> Result<()> {
         name: p.name,
         exe_path: exe_str,
         original_filename: p.original_filename,
+        cmd: p.cmd,
+        parent_pid: p.parent_pid,
         sha256: sha_str,
         flags: det.flags,
         severity: det.severity,

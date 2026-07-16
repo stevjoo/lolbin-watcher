@@ -15,6 +15,19 @@ const LOLBINS: &[&str] = &[
     "certutil.exe",
     "bitsadmin.exe",
     "wmic.exe",
+    "msbuild.exe",
+    "vbc.exe",
+    "forfiles.exe",
+    "schtasks.exe",
+    "bash.exe",
+    "psexec.exe",
+    "psexec64.exe",
+    "wsmprovhost.exe",
+    "csc.exe",
+    "installutil.exe",
+    "regasm.exe",
+    "regsvcs.exe",
+    "cmstp.exe",
 ];
 
 #[derive(Debug, Clone)]
@@ -123,6 +136,32 @@ impl RuleEngine {
         flags
     }
 
+    fn check_suspicious_cmdline(cmd: &[String]) -> Vec<String> {
+        let mut flags = Vec::new();
+        let cmd_joined = cmd.join(" ").to_lowercase();
+        if cmd_joined.contains("-enc") || cmd_joined.contains("-encodedcommand")
+            || cmd_joined.contains("-nop") || cmd_joined.contains("-noprofile")
+            || cmd_joined.contains("bypass") || cmd_joined.contains("-w hidden")
+            || cmd_joined.contains("downloadstring") || cmd_joined.contains("invoke-webrequest")
+            || cmd_joined.contains("http://") || cmd_joined.contains("https://")
+        {
+            flags.push("suspicious_cmdline".to_string());
+        }
+        flags
+    }
+
+    fn check_suspicious_parent(parent_name: Option<&str>) -> Vec<String> {
+        let mut flags = Vec::new();
+        if let Some(p) = parent_name {
+            let p_lc = p.to_lowercase();
+            // Office apps spawning child processes is generally suspicious
+            if p_lc == "winword.exe" || p_lc == "excel.exe" || p_lc == "powerpnt.exe" || p_lc == "msaccess.exe" {
+                flags.push("suspicious_parent".to_string());
+            }
+        }
+        flags
+    }
+
     // public API used by main.rs
 
     // Lightweight pre-scan: returns a list of flag strings so `main.rs` can
@@ -132,6 +171,8 @@ impl RuleEngine {
         proc_name: &str,
         exe_path: Option<&str>,
         original_filename: Option<&str>,
+        cmd: &[String],
+        parent_name: Option<&str>,
     ) -> Vec<String> {
         let mut flags: Vec<String> = Vec::new();
 
@@ -164,6 +205,9 @@ impl RuleEngine {
             flags.push("allowlisted_name".to_string());
         }
 
+        flags.extend(Self::check_suspicious_cmdline(cmd));
+        flags.extend(Self::check_suspicious_parent(parent_name));
+
         flags
     }
 
@@ -173,6 +217,8 @@ impl RuleEngine {
         proc_name: &str,
         exe_path: Option<&str>,
         original_filename: Option<&str>,
+        cmd: &[String],
+        parent_name: Option<&str>,
         sha256: Option<&str>,
     ) -> DetectionResult {
         let mut flags: Vec<String> = Vec::new();
@@ -230,14 +276,19 @@ impl RuleEngine {
             flags.push("lolbin_masquerade".to_string());
         }
 
+        flags.extend(Self::check_suspicious_cmdline(cmd));
+        flags.extend(Self::check_suspicious_parent(parent_name));
+
         // severity classification
         let has_exec_from = flags.iter().any(|f| f.starts_with("exec_from_"));
         let has_lolbin = flags.contains(&"lolbin_process".to_string());
         let has_masquerade = flags.contains(&"lolbin_masquerade".to_string());
         let has_renamed = flags.contains(&"renamed_binary".to_string());
+        let has_suspicious_cmd = flags.contains(&"suspicious_cmdline".to_string());
+        let has_suspicious_parent = flags.contains(&"suspicious_parent".to_string());
 
-        let severity = if has_masquerade {
-            // Renamed LOLBin — always High regardless of path
+        let severity = if has_masquerade || has_suspicious_cmd || has_suspicious_parent {
+            // Renamed LOLBin or suspicious behavior — always High regardless of path
             Severity::High
         } else if has_exec_from && has_lolbin {
             // LOLBin running from a suspicious path
